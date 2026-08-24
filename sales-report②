@@ -1,0 +1,85 @@
+function sendWeeklySalesReport() {
+  // 1. 売上ログシートのB列の合計を計算
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const logSheet = ss.getSheetByName('売上ログ');
+  
+  // B2セルから最終行までのデータ（売上金額）を取得
+  const lastRow = logSheet.getLastRow();
+  let totalSales = 0;
+  
+  if (lastRow >= 2) { // 2行目以降にデータがある場合
+    const salesValues = logSheet.getRange(2, 2, lastRow - 1, 1).getValues(); // B2:B[最終行]
+    totalSales = salesValues.reduce((sum, row) => {
+      const val = Number(row[0]);
+      return sum + (isNaN(val) ? 0 : val);
+    }, 0);
+  }
+
+  // 金額を「¥1,000」形式にフォーマット
+  const formattedSales = totalSales.toLocaleString();
+
+  // 2. 外部APIから日本の祝日一覧を取得して「次に来る祝日」を探す
+  const holidayUrl = 'https://holidays-jp.github.io/api/v1/date.json';
+  
+  // 【通信エラー・タイムアウト対策】
+  const options = {
+    'muteHttpExceptions': true
+  };
+
+  let response;
+  let success = false;
+
+  // 10秒タイムアウトなどで失敗した場合に備え、最大5回まで自動でリトライする
+  for (let i = 0; i < 5; i++) {
+    try {
+      response = UrlFetchApp.fetch(holidayUrl, options);
+      if (response.getResponseCode() === 200) {
+        success = true;
+        break; // 成功したらループを抜ける
+      }
+    } catch (e) {
+      // 一時的な不具合の可能性があるため1秒待って再試行
+      Utilities.sleep(1000);
+    }
+  }
+
+  // 5回試しても通信できなかった場合のエラー処理
+  if (!success) {
+    throw new Error('祝日データの取得時に通信タイムアウトが発生しました。再度実行してください。');
+  }
+
+  const holidays = JSON.parse(response.getContentText());
+
+  const todayStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  const todayFormatted = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M月d日');
+  
+  let nextHolidayDate = '';
+  let nextHolidayName = '';
+
+  // 祝日データを日付順にチェック
+  const sortedDates = Object.keys(holidays).sort();
+  for (const dateStr of sortedDates) {
+    if (dateStr >= todayStr) {
+      nextHolidayDate = dateStr;
+      nextHolidayName = holidays[dateStr];
+      break; // 最初に見つかった（＝今日以降で一番近い）祝日で終了
+    }
+  }
+
+  // 3. 自分宛てのメールを作成・送信
+  const recipient = Session.getActiveUser().getEmail(); // 自分のGmailアドレスを取得
+  const subject = `【売上レポート ${todayFormatted}】今週の売上合計：${formattedSales}円`;
+  
+  let body = `お疲れ様です。\n\n`;
+  body += `『売上ログ』シートの売上合計金額をお知らせします。\n\n`;
+  body += `・今週の売上合計：${formattedSales}円\n`;
+  if (nextHolidayDate) {
+    body += `・次に来る祝日：${nextHolidayDate} (${nextHolidayName})\n`;
+  } else {
+    body += `・次に来る祝日：取得できませんでした\n`;
+  }
+  body += `\n※このメールはGoogle Apps Scriptより自動送信されています。`;
+
+  MailApp.sendEmail(recipient, subject, body);
+  Logger.log('メールを送信しました: ' + recipient);
+}
