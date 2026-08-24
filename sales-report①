@@ -1,0 +1,17 @@
+function appendDailySales() {
+  // 1. アクティブなスプレッドシートを取得
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // 2. シートの取得
+  const salesSheet = ss.getSheetByName('本日の売上');
+  const logSheet = ss.getSheetByName('売上ログ');
+  
+  // 3. 本日の売上シートのB1セルの値を取得
+  const salesValue = salesSheet.getRange('B1').getValue();
+  
+  // 4. 今日の日付を取得
+  const today = new Date();
+  
+  // 5. 売上ログシートの最下行に [日付, 売上金額] を追記
+  logSheet.appendRow([today, salesValue]);
+}
